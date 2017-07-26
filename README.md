@@ -14,13 +14,13 @@ then type your password and you can start uploading files.
 
 Decrypt files with
 
-    ./decrypt.py <filename>
+    ./decrypt.py <encrypted_filename> > <decrypted_filename>
 
 then type the same password used when starting the server.
 
 
 ## Installation
 
-Install the dependencies by typing
+Install the dependencies with
 
     pip install futures==3.0.5 pycrypto==2.6.1 tornado==4.3

@@ -24,6 +24,7 @@ def decrypt_file(password, in_fd, out_fd, chunksize=4*1024):
     decryptor = AES.new(key, AES.MODE_CBC, iv)
 
     in_pos = in_fd.tell()
+    decrypted_size = 0
     while True:
         read_size = chunksize
         in_pos += read_size
@@ -36,12 +37,16 @@ def decrypt_file(password, in_fd, out_fd, chunksize=4*1024):
         chunk = in_fd.read(read_size)
         if len(chunk) == 0:
             break
-        out_fd.write(decryptor.decrypt(chunk))
-        if in_pos == in_eof:
+        output = decryptor.decrypt(chunk)
+        output_size = len(output)
+        decrypted_size += output_size
+        if decrypted_size > origsize:
+            out_fd.write(output[:output_size - (decrypted_size - origsize)])
             break
 
-    out_fd.seek(0) 
-    out_fd.truncate(origsize)
+        out_fd.write(output)
+        if in_pos == in_eof:
+            break
 
 
 if __name__ == "__main__":
