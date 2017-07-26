@@ -1,0 +1,4 @@
+*.swp
+*.pyc
+/storage
+local_settings.py
