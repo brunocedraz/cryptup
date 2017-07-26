@@ -34,7 +34,7 @@ TP = concurrent.futures.ThreadPoolExecutor(20)
 def generate_key(password, salt=None):
     if not salt:
         salt = Random.get_random_bytes(2) 
-    return salt, KDF.PBKDF2(password, salt, 32, 4092)
+    return salt, KDF.PBKDF2(password, salt, 32, 4096)
 
 
 def disable_client_caching(func):
@@ -275,7 +275,6 @@ def decrypt_file(password, in_fd, out_fd, chunksize=4*1024):
 if __name__ == "__main__":
     STORAGE_PATH = os.path.realpath('storage')
     SERVER_PORT = 8000
-
 
     parser = argparse.ArgumentParser(description='Process some integers.')
     parser.add_argument('encrypted_file',
