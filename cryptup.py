@@ -3,6 +3,7 @@
 
 # pip install futures==3.0.5 pycrypto==2.6.1 tornado==4.3
 
+import argparse
 import concurrent.futures
 import cgi
 import getpass
@@ -10,6 +11,7 @@ import logging
 import os
 import shutil
 import struct
+import sys
 import tempfile
 from functools import wraps
 from mimetools import Message
@@ -230,41 +232,104 @@ class ErrorHandler(tornado.web.ErrorHandler, BaseHandler):
     pass
 
 
+def decrypt_file(password, in_fd, out_fd, chunksize=4*1024):
+    in_fd.seek(0)
+    salt = in_fd.read(2)
+
+    _, key = generate_key(PASSWORD, salt)
+
+    size_len = struct.calcsize('Q')
+    in_fd.seek(-size_len, 2)
+    in_eof = in_fd.tell()
+    origsize = struct.unpack('<Q', in_fd.read(size_len))[0]
+    in_fd.seek(2)
+    iv = in_fd.read(AES.block_size)
+    decryptor = AES.new(key, AES.MODE_CBC, iv)
+
+    in_pos = in_fd.tell()
+    decrypted_size = 0
+    while True:
+        read_size = chunksize
+        in_pos += read_size
+        if in_pos >= in_eof:
+            read_size -= (in_pos - in_eof)
+            in_pos -= (in_pos - in_eof)
+
+        if read_size == 0:
+            break
+        chunk = in_fd.read(read_size)
+        if len(chunk) == 0:
+            break
+        output = decryptor.decrypt(chunk)
+        output_size = len(output)
+        decrypted_size += output_size
+        if decrypted_size > origsize:
+            out_fd.write(output[:output_size - (decrypted_size - origsize)])
+            break
+
+        out_fd.write(output)
+        if in_pos == in_eof:
+            break
+
+
 if __name__ == "__main__":
     STORAGE_PATH = os.path.realpath('storage')
-    while True:
-        PASSWORD = getpass.getpass("Type encryption password: ")
-        CONFIRM = getpass.getpass("Confirm password: ")
-        if PASSWORD == CONFIRM:
-            break
-        print('Passwords do not match. Try again...')
-
     SERVER_PORT = 8000
-    DEBUG = True
 
-    if not os.path.exists(STORAGE_PATH):
-        os.makedirs(STORAGE_PATH)
 
-    application = tornado.web.Application([
-            (r"/upload", UploadHandler),  # POST
-            (r"/", FrontPageHandler),  # GET
-            (r"/favicon.ico", FaviconHandler),  # GET
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('encrypted_file',
+                        nargs='?',
+                        help='decrypt file instead of running server')
+    parser.add_argument('-p',
+                        '--port',
+                        dest='SERVER_PORT',
+                        default=SERVER_PORT,
+                        type=int,
+                        help='run server on the given port')
 
-            (r"/ping", PingHandler),  # GET
-       ],
-       default_handler_class=ErrorHandler,
-       default_handler_args=dict(status_code=404),
-       debug=DEBUG
-    )
+    parser.add_argument('-s',
+                        '--storage',
+                        dest='STORAGE_PATH',
+                        default=STORAGE_PATH,
+                        type=str,
+                        help='directory to store uploaded files')
 
-    tornado.options.define("port",
-                           default=SERVER_PORT,
-                           help="run on the given port",
-                           type=int)
-    tornado.options.options.parse_command_line()
+    args = parser.parse_args()
 
-    application.listen(tornado.options.options.port,
-                       max_buffer_size=300 * (1024*1024))
-    print("Starting server...")
-    tornado.ioloop.IOLoop.instance().start()
+    if args.encrypted_file is not None:
+        PASSWORD = getpass.getpass("Type encryption password: ")
+
+        with open(args.encrypted_file, 'rb') as f:
+            decrypt_file(PASSWORD, f, sys.stdout)
+
+    else:
+        while True:
+            PASSWORD = getpass.getpass("Type encryption password: ")
+            CONFIRM = getpass.getpass("Confirm password: ")
+            if PASSWORD == CONFIRM:
+                break
+            print('Passwords do not match. Try again...')
+
+        STORAGE_PATH = os.path.realpath(args.STORAGE_PATH)
+        
+        if not os.path.exists(STORAGE_PATH):
+            os.makedirs(STORAGE_PATH)
+
+        application = tornado.web.Application([
+                (r"/upload", UploadHandler),  # POST
+                (r"/", FrontPageHandler),  # GET
+                (r"/favicon.ico", FaviconHandler),  # GET
+
+                (r"/ping", PingHandler),  # GET
+           ],
+           default_handler_class=ErrorHandler,
+           default_handler_args=dict(status_code=404),
+           debug=False
+        )
+
+        application.listen(args.SERVER_PORT,
+                           max_buffer_size=300 * (1024*1024))
+        print("Starting server...")
+        tornado.ioloop.IOLoop.instance().start()
 
