@@ -1,7 +1,7 @@
 CryptUp
 =======
 
-Upload server that encrypts files before reaching the disk.
+Upload server that encrypts files before touching the disk.
 
 
 ## Usage
