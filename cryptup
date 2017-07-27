@@ -34,7 +34,7 @@ TP = concurrent.futures.ThreadPoolExecutor(20)
 
 def generate_key(password, salt=None):
     if not salt:
-        salt = Random.get_random_bytes(2) 
+        salt = Random.get_random_bytes(8) 
     return salt, KDF.PBKDF2(password, salt, 32, 4096)
 
 
@@ -202,7 +202,7 @@ class ErrorHandler(tornado.web.ErrorHandler, BaseHandler):
 
 def decrypt_file(password, in_fd, out_fd, chunksize=4*1024):
     in_fd.seek(0)
-    salt = in_fd.read(2)
+    salt = in_fd.read(8)
 
     _, key = generate_key(PASSWORD, salt)
 
@@ -210,7 +210,7 @@ def decrypt_file(password, in_fd, out_fd, chunksize=4*1024):
     in_fd.seek(-size_len, 2)
     in_eof = in_fd.tell()
     origsize = struct.unpack('<Q', in_fd.read(size_len))[0]
-    in_fd.seek(2)
+    in_fd.seek(8)
     iv = in_fd.read(AES.block_size)
     decryptor = AES.new(key, AES.MODE_CBC, iv)
 
