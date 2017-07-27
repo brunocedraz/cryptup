@@ -90,7 +90,10 @@ class UploadHandler(BaseHandler):
                 self.boundary = self.boundary[:bpos]
                 self.boundary_text = '\r\n' + self.boundary + '--\r\n'
                 self.boundary_length = len(self.boundary_text)
-                chunk = chunk[bpos + 2:]
+                if chunk[bpos + 1].isspace():
+                    chunk = chunk[bpos + 2:]
+                else:
+                    chunk = chunk[bpos + 1:]
                 self.status = 1
         if self.status == 1:
             self.fileinfo = self.fileinfo + chunk
