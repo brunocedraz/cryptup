@@ -13,6 +13,7 @@ import shutil
 import struct
 import sys
 import tempfile
+import traceback
 from functools import wraps
 from mimetools import Message
 from StringIO import StringIO
@@ -47,29 +48,14 @@ def disable_client_caching(func):
     return wrapper
 
 
-class UnauthorizedException(Exception):
-    def __init__(self, message, cause):
-        super(UnauthorizedException, self).__init__(message + u', caused by ' + repr(cause))
-        self.cause = cause
-
-
 class BaseHandler(tornado.web.RequestHandler):
     fail_redirect = '/'
 
     @disable_client_caching
     def write_error(self, status_code, **kwargs):
-        if len(self.fail_redirect) > 0:
-            self.redirect(self.fail_redirect) 
-        else:
-            self.set_status(200)
-            if "exc_info" in kwargs:
-                if kwargs["exc_info"][0] == UnauthorizedException:
-                    self.write('{"status":"unauthorized","message":""}')
-                else:
-                    self.write('{"status":"failure","message":""}')
-            else:
-                logging.error("Error " + str(status_code) + ": " + str(kwargs))
-                self.write('{"status":"failure","message":""}')
+        exc = traceback.format_exception(*kwargs["exc_info"])
+        logging.error(''.join(exc))
+        self.redirect(self.fail_redirect) 
 
     def set_fail_redirect(self, redirect):
         self.fail_redirect = redirect
@@ -88,14 +74,13 @@ class UploadHandler(BaseHandler):
             self.boundary_text = ''
             self.enc_buffer = ''
             self.fsize = 0
-            self.encrypted = True
-            self.salt, self.key = generate_key(PASSWORD)
             self.original_size = 0
-            if self.encrypted == True:
-                iv = Random.new().read(AES.block_size)
-                self.encryptor = AES.new(self.key, AES.MODE_CBC, iv)
-                self.temp_file.write(self.salt)
-                self.temp_file.write(iv)
+
+            salt, key = generate_key(PASSWORD)
+            iv = Random.new().read(AES.block_size)
+            self.encryptor = AES.new(key, AES.MODE_CBC, iv)
+            self.temp_file.write(salt)
+            self.temp_file.write(iv)
 
     def data_received(self, chunk):
         if self.status == 0:
@@ -115,30 +100,22 @@ class UploadHandler(BaseHandler):
                 chunk = chunk[ipos + 4:]
                 self.status = 2
         if self.status == 2:
-            if self.encrypted:
-                self.fsize += len(chunk)
-                self.enc_buffer = self.enc_buffer + chunk
-                eb_length = len(self.enc_buffer)
-                if eb_length >= 16:
-                    blocks = eb_length / 16
-                    current_buffer = self.enc_buffer[:16 * blocks]
-                    self.enc_buffer = self.enc_buffer[16 * blocks:]
-                    self.temp_file.write(self.encryptor.encrypt(current_buffer))
-                self.last_data = (self.last_data + chunk)[-self.boundary_length:]
-                if self.last_data == self.boundary_text:
-                    self.original_size = self.fsize - self.boundary_length
-                    if len(self.enc_buffer) > 0:
-                        if len(self.enc_buffer) % 16 != 0:
-                            self.enc_buffer += ' ' * (16 - len(self.enc_buffer) % 16)
-                        self.temp_file.write(self.encryptor.encrypt(self.enc_buffer))
-                    self.temp_file.write(struct.pack('<Q', self.original_size))
-            else:
-                self.fsize += len(chunk)
-                self.temp_file.write(chunk)
-                self.last_data = (self.last_data + chunk)[-self.boundary_length:]
-                if self.last_data == self.boundary_text:
-                    self.original_size = self.fsize - self.boundary_length
-                    self.temp_file.truncate(self.original_size)
+            self.fsize += len(chunk)
+            self.enc_buffer = self.enc_buffer + chunk
+            eb_length = len(self.enc_buffer)
+            if eb_length >= 16:
+                blocks = eb_length / 16
+                current_buffer = self.enc_buffer[:16 * blocks]
+                self.enc_buffer = self.enc_buffer[16 * blocks:]
+                self.temp_file.write(self.encryptor.encrypt(current_buffer))
+            self.last_data = (self.last_data + chunk)[-self.boundary_length:]
+            if self.last_data == self.boundary_text:
+                self.original_size = self.fsize - self.boundary_length
+                if len(self.enc_buffer) > 0:
+                    if len(self.enc_buffer) % 16 != 0:
+                        self.enc_buffer += ' ' * (16 - len(self.enc_buffer) % 16)
+                    self.temp_file.write(self.encryptor.encrypt(self.enc_buffer))
+                self.temp_file.write(struct.pack('<Q', self.original_size))
 
     @gen.coroutine
     def post(self):
@@ -166,18 +143,6 @@ class UploadHandler(BaseHandler):
 
         return filename
 
-    def set_default_headers(self):
-        r_format = self.get_argument('format', 'web')
-        if r_format != 'web':
-            origin = self.request.headers.get('Origin')
-            if origin is not None:
-                self.set_header("Access-Control-Allow-Headers", "Cache-Control, X-Requested-With")
-                self.set_header('Access-Control-Allow-Methods', 'POST')
-
-    def options(self):
-        self.set_status(204)
-        self.finish()
-
 
 class FrontPageHandler(tornado.web.RequestHandler):
     @disable_client_caching
@@ -194,8 +159,8 @@ class FrontPageHandler(tornado.web.RequestHandler):
     <meta name="description" content="">
     <meta name="viewport" content="width=device-width, initial-scale=1">
   </head>
-  <body>
-    <h1>CryptUp</h1>
+  <body style="font-family:Helvetica Neue, Helvetica, Arial, sans-serif;">
+    <h1>CryptUp <sub><span style="font-size: 40%;">''' + str(MAX_BUFFER_SIZE // (1024*1024)) + ''' MB</span></sub></h1>
     <form enctype="multipart/form-data" action="upload" method="post">
       <input name="upload" id="upload" type="file"></input>
       <br/>
@@ -286,13 +251,28 @@ if __name__ == "__main__":
                         default=SERVER_PORT,
                         type=int,
                         help='run server on the given port')
-
     parser.add_argument('-s',
                         '--storage',
                         dest='STORAGE_PATH',
                         default=STORAGE_PATH,
                         type=str,
                         help='directory to store uploaded files')
+    parser.add_argument('-c',
+                        '--certfile',
+                        dest='certfile',
+                        type=str,
+                        help='HTTPS certificate chain (same as nginx)')
+    parser.add_argument('-k',
+                        '--keyfile',
+                        dest='keyfile',
+                        type=str,
+                        help='HTTPS certificate key')
+    parser.add_argument('-u',
+                        '--upload-limit',
+                        dest='upload_limit',
+                        default=100,
+                        type=int,
+                        help='maximum upload file size')
 
     args = parser.parse_args()
 
@@ -310,6 +290,7 @@ if __name__ == "__main__":
                 break
             print('Passwords do not match. Try again...')
 
+        MAX_BUFFER_SIZE = args.upload_limit * (1024*1024)
         STORAGE_PATH = os.path.realpath(args.STORAGE_PATH)
         
         if not os.path.exists(STORAGE_PATH):
@@ -327,8 +308,18 @@ if __name__ == "__main__":
            debug=False
         )
 
-        application.listen(args.SERVER_PORT,
-                           max_buffer_size=300 * (1024*1024))
-        print("Starting server...")
+        if args.certfile is not None and args.keyfile is not None:
+            application.listen(args.SERVER_PORT,
+                               max_buffer_size=MAX_BUFFER_SIZE,
+                               ssl_options={
+                                   "certfile": args.certfile,
+                                   "keyfile": args.keyfile,
+                               })
+            print("Starting HTTPS server...")
+        else:
+            application.listen(args.SERVER_PORT,
+                               max_buffer_size=MAX_BUFFER_SIZE)
+            print("Starting HTTP server...")
+
         tornado.ioloop.IOLoop.instance().start()
 
