@@ -1,5 +1,4 @@
-CryptUp
-=======
+# CryptUp
 
 Upload server that encrypts files before touching the disk.
 
@@ -32,3 +31,10 @@ Install dependencies with
 Ubuntu 16.04 might require
 
     sudo apt install python-dev
+
+
+## License
+
+cryptup is Copyright © 2017 Bruno Cedraz Brandão. It is free software, and may
+be redistributed under the terms specified in the [LICENSE](LICENSE) file.
+
